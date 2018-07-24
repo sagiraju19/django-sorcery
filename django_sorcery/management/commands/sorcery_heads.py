@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, print_function, unicode_literals
-import os
 
 from ..alembic import AlembicCommand
 
@@ -8,21 +7,22 @@ from ..alembic import AlembicCommand
 class ShowHeads(AlembicCommand):
     help = "Display revision heads"
 
-    def handle(self, verbosity=0, **kwargs):
-        verbosity = bool(verbosity - 1)
+    def add_arguments(self, parser):
+        parser.add_argument("app_label", nargs="?", help="App label of application to limit the output to.")
 
-        for db in self.db_apps:
-            self.stdout.write(self.style.SUCCESS("Heads for %s" % db.alias))
-            config = self.configs[db]
-            script = self.get_script(config)
-            for rev in script.get_revisions("heads"):
-                app = self.config.version_locations.get(os.path.dirname(rev.path))
+    def handle(self, app_label=None, verbosity=0, **kwargs):
+        verbosity = bool(verbosity - 1)
+        appconfigs = [self.lookup_app(app_label)] if app_label is not None else self.sorcery_apps.values()
+
+        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+            self.stdout.write(self.style.SUCCESS("Heads for %s on database %s" % (appconfig.name, appconfig.db.alias)))
+            for rev in appconfig.script.get_revisions("heads"):
                 if verbosity:
                     self.stdout.write(
                         "".join(
                             [
                                 "[",
-                                app.label,
+                                appconfig.name,
                                 "]\n",
                                 rev.cmd_format(verbosity, include_branches=True, tree_indicators=False),
                             ]
@@ -34,7 +34,7 @@ class ShowHeads(AlembicCommand):
                             [
                                 rev.cmd_format(verbosity, include_branches=True, tree_indicators=False),
                                 " <",
-                                app.label,
+                                appconfig.name,
                                 "> ",
                             ]
                         )

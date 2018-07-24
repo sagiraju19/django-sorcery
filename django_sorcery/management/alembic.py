@@ -2,12 +2,14 @@
 from __future__ import absolute_import, print_function, unicode_literals
 import os
 import sys
+from collections import namedtuple
 
 import alembic
 import alembic.config
 
 from django.apps import apps
 from django.core.management.base import BaseCommand
+from django.utils.functional import cached_property
 
 import django_sorcery.db.alembic
 from django_sorcery.db import SQLAlchemy, signals
@@ -17,50 +19,51 @@ from django_sorcery.db.alembic import include_object, include_symbol, process_re
 SORCERY_ALEMBIC_CONFIG_FOLDER = os.path.dirname(django_sorcery.db.alembic.__file__)
 
 
-class AlembicCommand(BaseCommand):
-    def __init__(self, stdout=None, stderr=None, no_color=False):
-        super(AlembicCommand, self).__init__(stdout, stderr, no_color)
+AlembicAppConfig = namedtuple("AlembicAppConfig", ["name", "config", "script", "db", "app", "version_path"])
 
-        self.app_version_paths = {}
-        self.version_path_app = {}
-        self.app_dbs = {}
-        self.db_apps = {}
-        self.configs = {}
-        for app in apps.app_configs.values():
+
+class AlembicCommand(BaseCommand):
+    @cached_property
+    def sorcery_apps(self):
+        configs = {}
+        for name, app in apps.app_configs.items():
             db = self._get_app_db(app)
             if db is not None:
-                self.app_version_paths[app] = self.get_app_version_path(app)
-                self.version_path_app[self.get_app_version_path(app)] = app
-                self.app_dbs[app] = db
-                self.db_apps.setdefault(db, []).append(app)
-                config = alembic.config.Config()
-                config.set_main_option("script_location", SORCERY_ALEMBIC_CONFIG_FOLDER)
-                signals.alembic_config_created.send(config)
-                self.configs[db] = config
+                config = self.get_app_config(app)
+                configs[name] = AlembicAppConfig(
+                    name=name,
+                    config=config,
+                    db=db,
+                    script=self.get_config_script(config),
+                    version_path=self.get_app_version_path(app),
+                    app=app,
+                )
 
-        for db, config in self.configs.items():
-            config.set_main_option(
-                "version_locations", " ".join([self.app_version_paths[app] for app in self.db_apps[db]])
-            )
+        return configs
 
-        # self.script = alembic.script.ScriptDirectory.from_config(self.config)
+    def get_app_config(self, app):
+        config = alembic.config.Config()
+        config.set_main_option("script_location", SORCERY_ALEMBIC_CONFIG_FOLDER)
+        config.set_main_option("version_locations", self.get_app_version_path(app))
+        config.set_main_option("version_table", "alembic_version_%s" % app.label.lower())
+        signals.alembic_config_created.send(config)
+        return config
 
-    def get_script(self, config):
+    def get_config_script(self, config):
         return alembic.script.ScriptDirectory.from_config(config)
 
     def lookup_app(self, app_label):
         try:
-            app = apps.get_app_config(app_label)
+            apps.get_app_config(app_label)
         except LookupError:
             self.stderr.write("App '%s' could not be found. Is it in INSTALLED_APPS?" % app_label)
             sys.exit(2)
 
-        db = self.app_dbs.get(app)
-        if not db:
+        if app_label not in self.sorcery_apps:
             self.stderr.write("App '%s' is missing magic. Is it a sorcery app?" % app_label)
             sys.exit(2)
 
-        return app
+        return self.sorcery_apps[app_label]
 
     def get_app_version_path(self, app):
         return os.path.join(app.path, "migrations")
@@ -77,9 +80,6 @@ class AlembicCommand(BaseCommand):
             if isinstance(val, SQLAlchemy):
                 return val
 
-    def app_dbs(self, app):
-        return self
-
     def get_common_config(self, context):
         config = context.config
         return dict(
@@ -91,22 +91,27 @@ class AlembicCommand(BaseCommand):
             version_table_schema=config.get_main_option("version_table_schema"),
         )
 
-    def run_env(self, context, db):
+    def run_env(self, context, appconfig):
         if context.is_offline_mode():
-            self.run_migrations_offline(context, db)
+            self.run_migrations_offline(context, appconfig)
         else:
-            self.run_migrations_online(context, db)
+            self.run_migrations_online(context, appconfig)
 
-    def run_migrations_online(self, context, db):
-        with db.engine.connect() as connection:
-            context.configure(connection=connection, target_metadata=db.metadata, **self.get_common_config(context))
+    def run_migrations_online(self, context, appconfig):
+        with appconfig.db.engine.connect() as connection:
+            context.configure(
+                connection=connection, target_metadata=appconfig.db.metadata, **self.get_common_config(context)
+            )
 
             with context.begin_transaction():
                 context.run_migrations()
 
-    def run_migrations_offline(self, context, db):
+    def run_migrations_offline(self, context, appconfig):
         context.configure(
-            url=db.url, literal_binds=True, target_metadata=db.metadata, **self.get_common_config(context)
+            url=appconfig.db.url,
+            literal_binds=True,
+            target_metadata=appconfig.db.metadata,
+            **self.get_common_config(context)
         )
         with context.begin_transaction():
             context.run_migrations()

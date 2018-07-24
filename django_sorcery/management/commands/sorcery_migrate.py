@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, print_function, unicode_literals
-import sys
 from functools import partial
 
 import alembic
-
-from django_sorcery.db import databases
 
 from ..alembic import AlembicCommand
 
@@ -14,7 +11,7 @@ class Migrate(AlembicCommand):
     help = "Apply migration revisions"
 
     def add_arguments(self, parser):
-        parser.add_argument("database", nargs="?", help="Specify the database to apply migrations for.")
+        parser.add_argument("app_label", nargs="?", help="App label of application to limit the output to.")
         parser.add_argument(
             "-r",
             "--revision",
@@ -23,43 +20,39 @@ class Migrate(AlembicCommand):
             'migration. Use the name "base" to unapply all migrations.',
         )
 
-    def handle(self, database=None, revision=None, verbosity=0, **kwargs):
-        try:
-            dbs = [databases.get(database)] if database else databases.values()
-        except LookupError:
-            self.stderr.write("Database '%s' could not be found." % database)
-            sys.exit(2)
+    def handle(self, app_label=None, revision=None, **kwargs):
+        appconfigs = [self.lookup_app(app_label)] if app_label is not None else self.sorcery_apps.values()
 
-        for db in dbs:
-            self.stdout.write(self.style.SUCCESS("Running migrations for %s" % db.alias))
-            config = self.configs[db]
-            script = self.get_script(config)
-            self.migrate(db, config, script, revision)
+        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+            self.stdout.write(
+                self.style.SUCCESS("Running migrations for %s on database %s" % (appconfig.name, appconfig.db.alias))
+            )
+            self.migrate(appconfig, revision)
 
-    def migrate(self, db, config, script, revision, starting_rev=None):
+    def migrate(self, appconfig, revision, starting_rev=None):
         if "head" not in revision:
             with alembic.context.EnvironmentContext(
-                config,
-                script,
-                fn=partial(self.downgrade, script=script, revision=revision),
+                appconfig.config,
+                appconfig.script,
+                fn=partial(self.downgrade, appconfig=appconfig, revision=revision),
                 as_sql=False,
                 starting_rev=starting_rev,
                 destination_rev=revision,
             ) as context:
-                self.run_env(context, db)
+                self.run_env(context, appconfig)
 
         with alembic.context.EnvironmentContext(
-            config,
-            script,
-            fn=partial(self.upgrade, script=script, revision=revision),
+            appconfig.config,
+            appconfig.script,
+            fn=partial(self.upgrade, appconfig=appconfig, revision=revision),
             as_sql=False,
             starting_rev=starting_rev,
             destination_rev=revision,
         ) as context:
-            self.run_env(context, db)
+            self.run_env(context, appconfig)
 
-    def downgrade(self, rev, context, script, revision):
-        return script._downgrade_revs(revision, rev)
+    def downgrade(self, rev, context, appconfig, revision):
+        return appconfig.script._downgrade_revs(revision, rev)
 
-    def upgrade(self, rev, context, script, revision):
-        return script._upgrade_revs(revision, rev)
+    def upgrade(self, rev, context, appconfig, revision):
+        return appconfig.script._upgrade_revs(revision, rev)

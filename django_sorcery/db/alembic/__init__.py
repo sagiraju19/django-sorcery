@@ -20,22 +20,22 @@ def setup_config(config):
 
 
 def include_symbol(tablename, schema):
-    results = signals.alembic_include_symbol.send(tablename=tablename, schema=schema)
-    if len(results) > 1:
-        return all(**results)
+    results = signals.alembic_include_symbol.send(tablename, schema=schema)
+    if len(results) > 0:
+        return all([res[1] for res in results])
 
     return True
 
 
 def include_object(obj, name, type_, reflected, compare_to):
     results = signals.alembic_include_object.send(
-        obj=obj, name=name, type_=type_, reflected=reflected, compare_to=compare_to
+        obj, name=name, type_=type_, reflected=reflected, compare_to=compare_to
     )
-    if len(results) > 1:
-        return all(**results)
+    if len(results) > 0:
+        return all([res[1] for res in results])
 
     return True
 
 
 def process_revision_directives(context, revision, directives):
-    signals.alembic_process_revision_directives.send(context=context, revision=revision, directives=directives)
+    signals.alembic_process_revision_directives.send(context, revision=revision, directives=directives)

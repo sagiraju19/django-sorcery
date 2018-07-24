@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, print_function, unicode_literals
-import os
 import sys
 
 from ..alembic import AlembicCommand
@@ -10,6 +9,7 @@ class ShowMigrations(AlembicCommand):
     help = "Display alembic revisions"
 
     def add_arguments(self, parser):
+        parser.add_argument("app_label", nargs="?", help="App label of application to limit the output to.")
         parser.add_argument(
             "-r",
             "--rev_range",
@@ -19,8 +19,9 @@ class ShowMigrations(AlembicCommand):
             help="Specify a revision range; format is [start]:[end].",
         )
 
-    def handle(self, rev_range=None, verbosity=0, **kwargs):
+    def handle(self, app_label=None, rev_range=None, verbosity=0, **kwargs):
         verbose = bool(verbosity - 1)
+        appconfigs = [self.lookup_app(app_label)] if app_label is not None else self.sorcery_apps.values()
 
         if rev_range is not None:
             if ":" not in rev_range:
@@ -30,40 +31,17 @@ class ShowMigrations(AlembicCommand):
         else:
             base = head = None
 
-        self.print_history(verbose, base, head)
+        self.print_history(appconfigs, verbose, base, head)
 
-    def print_history(self, verbose, base, head):
-        for db, config in self.configs.items():
-            self.stdout.write(self.style.SUCCESS("Migrations for %s" % db.alias))
-            script = self.get_script(config)
-            for rev in script.walk_revisions(base=base or "base", head=head or "heads"):
-                app = self.version_path_app.get(os.path.dirname(rev.path))
-                if verbose:
-                    self.stdout.write(
-                        "".join(
-                            [
-                                "App: ",
-                                app.label,
-                                "\n",
-                                rev.cmd_format(
-                                    verbose=verbose, include_branches=True, include_doc=True, include_parents=True
-                                ),
-                            ]
-                        )
-                    )
-                else:
-                    self.stdout.write(
-                        "".join(
-                            [
-                                rev.cmd_format(
-                                    verbose=verbose, include_branches=True, include_doc=True, include_parents=True
-                                ),
-                                " [",
-                                app.label,
-                                "] ",
-                            ]
-                        )
-                    )
+    def print_history(self, appconfigs, verbose, base, head):
+        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+            self.stdout.write(
+                self.style.SUCCESS("Migrations for %s on database %s" % (appconfig.name, appconfig.db.alias))
+            )
+            for rev in appconfig.script.walk_revisions(base=base or "base", head=head or "heads"):
+                self.stdout.write(
+                    rev.cmd_format(verbose=verbose, include_branches=True, include_doc=True, include_parents=True)
+                )
 
 
 Command = ShowMigrations

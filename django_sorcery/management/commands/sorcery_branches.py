@@ -7,13 +7,18 @@ from ..alembic import AlembicCommand
 class ShowBranches(AlembicCommand):
     help = "Display alembic branches"
 
-    def handle(self, verbosity=0, **kwargs):
-        verbosity = bool(verbosity - 1)
+    def add_arguments(self, parser):
+        parser.add_argument("app_label", nargs="?", help="App label of application to limit the output to.")
 
-        for db, config in self.configs.items():
-            self.stdout.write(self.style.SUCCESS("Branches for %s" % db.alias))
-            script = self.get_script(config)
-            for rev in script.walk_revisions():
+    def handle(self, app_label=None, verbosity=0, **kwargs):
+        verbosity = bool(verbosity - 1)
+        appconfigs = [self.lookup_app(app_label)] if app_label is not None else self.sorcery_apps.values()
+
+        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+            self.stdout.write(
+                self.style.SUCCESS("Branches for %s on database %s" % (appconfig.name, appconfig.db.alias))
+            )
+            for rev in appconfig.script.walk_revisions():
                 if rev.is_branch_point:
                     self.stdout.write(
                         "%s\n%s\n",
