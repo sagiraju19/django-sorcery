@@ -2,7 +2,7 @@
 from __future__ import absolute_import, print_function, unicode_literals
 import os
 import sys
-from collections import namedtuple
+from collections import OrderedDict, namedtuple
 
 import alembic
 import alembic.config
@@ -12,7 +12,7 @@ from django.core.management.base import BaseCommand
 from django.utils.functional import cached_property
 
 import django_sorcery.db.alembic
-from django_sorcery.db import SQLAlchemy, signals
+from django_sorcery.db import databases, signals
 from django_sorcery.db.alembic import include_object, include_symbol, process_revision_directives
 
 
@@ -25,20 +25,27 @@ AlembicAppConfig = namedtuple("AlembicAppConfig", ["name", "config", "script", "
 class AlembicCommand(BaseCommand):
     @cached_property
     def sorcery_apps(self):
-        configs = {}
-        for name, app in apps.app_configs.items():
-            db = self._get_app_db(app)
-            if db is not None:
-                config = self.get_app_config(app)
-                configs[name] = AlembicAppConfig(
-                    name=name,
-                    config=config,
-                    db=db,
-                    script=self.get_config_script(config),
-                    version_path=self.get_app_version_path(app),
-                    app=app,
-                )
-
+        configs = OrderedDict()
+        for db in databases.values():
+            table_class_map = {
+                model.__table__: model
+                for model in db.Model._decl_class_registry.values()
+                if hasattr(model, "__table__")
+            }
+            for table in db.metadata.sorted_tables:
+                model = table_class_map.get(table)
+                if model:
+                    app = apps.get_containing_app_config(model.__module__)
+                    if app.label not in configs:
+                        config = self.get_app_config(app)
+                        configs[app.label] = AlembicAppConfig(
+                            name=app.label,
+                            config=config,
+                            db=db,
+                            script=self.get_config_script(config),
+                            version_path=self.get_app_version_path(app),
+                            app=app,
+                        )
         return configs
 
     def get_app_config(self, app):
@@ -67,18 +74,6 @@ class AlembicCommand(BaseCommand):
 
     def get_app_version_path(self, app):
         return os.path.join(app.path, "migrations")
-
-    def _get_app_db(self, app):
-        models_module = getattr(app, "models_module", None)
-        if models_module is None:
-            return
-
-        if hasattr(models_module, "db") and isinstance(models_module.db, SQLAlchemy):
-            return models_module.db
-
-        for val in vars(models_module).values():
-            if isinstance(val, SQLAlchemy):
-                return val
 
     def get_common_config(self, context):
         config = context.config

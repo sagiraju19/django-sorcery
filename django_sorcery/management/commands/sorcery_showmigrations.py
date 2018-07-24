@@ -34,7 +34,7 @@ class ShowMigrations(AlembicCommand):
         self.print_history(appconfigs, verbose, base, head)
 
     def print_history(self, appconfigs, verbose, base, head):
-        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+        for appconfig in appconfigs:
             self.stdout.write(
                 self.style.SUCCESS("Migrations for %s on database %s" % (appconfig.name, appconfig.db.alias))
             )

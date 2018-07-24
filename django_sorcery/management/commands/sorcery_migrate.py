@@ -23,7 +23,7 @@ class Migrate(AlembicCommand):
     def handle(self, app_label=None, revision=None, **kwargs):
         appconfigs = [self.lookup_app(app_label)] if app_label is not None else self.sorcery_apps.values()
 
-        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+        for appconfig in appconfigs:
             self.stdout.write(
                 self.style.SUCCESS("Running migrations for %s on database %s" % (appconfig.name, appconfig.db.alias))
             )

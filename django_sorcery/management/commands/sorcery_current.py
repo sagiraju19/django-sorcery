@@ -17,7 +17,7 @@ class Current(AlembicCommand):
         verbose = bool(verbosity - 1)
         appconfigs = [self.lookup_app(app_label)] if app_label is not None else self.sorcery_apps.values()
 
-        for appconfig in sorted(appconfigs, key=lambda appconfig: appconfig.name):
+        for appconfig in appconfigs:
             self.stdout.write(
                 self.style.SUCCESS("Revision for %s on database %s" % (appconfig.name, appconfig.db.alias))
             )
